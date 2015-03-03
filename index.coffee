@@ -48,7 +48,7 @@ class PgBrain extends Brain
   checkVersion: ->
     query = "SELECT VERSION()"
     Q.ninvoke(@client, 'query', query).then (results) =>
-      if results.length is 0 or not parseFloat(results[0].replace(/^postgresql /i)) >= 9.4
+      if result.rows.length is 0 or not parseFloat(result.rows[0].replace(/^postgresql /i)) >= 9.4
         throw Error("Postgres version must be at least 9.4")
 
   initTable: ->
@@ -56,7 +56,7 @@ class PgBrain extends Brain
     query = "CREATE TABLE IF NOT EXISTS #{@tableName} (key varchar(255) NOT NULL, subkey varchar(255), value jsonb, PRIMARY KEY (key), UNIQUE (key, subkey))"
     Q.ninvoke(@client, 'query', query)
 
-  @query: (query, params) ->
+  query: (query, params) ->
     @ready.then =>
       Q.ninvoke(@client, 'query', query, params).fail (err) =>
         @robot.logger.error('PGSQL error:', err.stack)
@@ -88,10 +88,10 @@ class PgBrain extends Brain
       params.push(subkey)
 
     @query("SELECT value FROM #{@tableName} WHERE key = $1 #{subkeyPart}", params).then (results) =>
-      _.map(results, (result) => @deserialize(result.value))
+      _.map(result.rows, (result) => @deserialize(result.value))
 
   llen: (key) ->
-    @query("SELECT json_array_length(value::json) FROM #{@tableName} WHERE key = $1 AND value @> '[]'", [@key(key)]).then (results) -> results[0] or 0
+    @query("SELECT json_array_length(value::json) FROM #{@tableName} WHERE key = $1 AND value @> '[]'", [@key(key)]).then (results) -> result.rows[0] or 0
 
   lset: (key, index, value) ->
     @lgetall(key).then (values) =>
@@ -134,7 +134,7 @@ class PgBrain extends Brain
       @updateValue(@key(key), values).then -> value
 
   lindex: (key, index) ->
-    @query("SELECT value -> $1 AS value FROM #{@tableName} WHERE key = $2 AND value @> '[]'", [index, @key(key)]).then (result) -> result[0]?.value or -1
+    @query("SELECT value -> $1 AS value FROM #{@tableName} WHERE key = $2 AND value @> '[]'", [index, @key(key)]).then (result) -> results.rows[0]?.value or -1
 
   lgetall: (key) ->
     @getValues(@key(key))
@@ -161,7 +161,7 @@ class PgBrain extends Brain
       @updateSet(@key(key), values)
 
   sismember: (key, value) ->
-    @query("SELECT 1 FROM #{@tableName} WHERE value @> '[]' AND key = $1 AND value ? $2", [@key(key), value]).then (results) -> results.length > 0
+    @query("SELECT 1 FROM #{@tableName} WHERE value @> '[]' AND key = $1 AND value ? $2", [@key(key), value]).then (results) -> result.rows.length > 0
 
   srem: (key, value) ->
     @lrem(key, value)
@@ -182,7 +182,7 @@ class PgBrain extends Brain
   keys: (searchKey = '') ->
     searchKey = @key searchKey
     @query("SELECT key FROM #{@tableName} WHERE key LIKE $1", ["#{searchKey}%"]).then (results) =>
-      _.map(results, (result) => @unkey(result.key))
+      _.map(result.rows, (result) => @unkey(result.key))
 
   type: (key) ->
     #TODO
@@ -201,13 +201,13 @@ class PgBrain extends Brain
     "users"
 
   subExists: (table, key) ->
-    @query("SELECT 1 FROM #{@tableName} WHERE key = $1 AND subkey = $2 LIMIT 1", [@key(table), key]).then (results) -> results.length > 0
+    @query("SELECT 1 FROM #{@tableName} WHERE key = $1 AND subkey = $2 LIMIT 1", [@key(table), key]).then (results) -> result.rows.length > 0
 
   exists: (key) ->
-    @query("SELECT 1 FROM #{@tableName} WHERE key = $1 LIMIT 1", [@key(key)]).then (results) -> results.length > 0
+    @query("SELECT 1 FROM #{@tableName} WHERE key = $1 LIMIT 1", [@key(key)]).then (results) -> result.rows.length > 0
 
   get: (key) ->
-    @getValues(@key(key)).then (results) -> results[0]?.value
+    @getValues(@key(key)).then (results) -> result.rows[0]?.value
 
   set: (key, value) ->
     @updateValue(@key(key), value)
@@ -243,7 +243,7 @@ class PgBrain extends Brain
   #
   # Returns promise for int.
   hlen: (table) ->
-    @query("SELECT COUNT(*) FROM #{@tableName} WHERE key = $1 GROUP BY key", [@key(table)]).then (results) -> result[0] or 0
+    @query("SELECT COUNT(*) FROM #{@tableName} WHERE key = $1 GROUP BY key", [@key(table)]).then (results) -> results.rows[0] or 0
 
   # Public: Set a value in the specified hash table
   #
@@ -255,7 +255,7 @@ class PgBrain extends Brain
   #
   # Returns: promise for the value.
   hget: (table, key) ->
-    @getValues(@key(table), key).then (results) -> results[0]
+    @getValues(@key(table), key).then (results) -> result.rows[0]
 
   # Public: Delete a field from the specified hash table.
   #
@@ -268,7 +268,7 @@ class PgBrain extends Brain
   # Returns: promise for object.
   hgetall: (table) ->
     @query("SELECT subkey, value FROM #{@tableName} WHERE key = $1", [@key(table)]).then (results) =>
-      _.zip(_.map(results, (result) => [result.subkey, result.value]))
+      _.zip(_.map(result.rows, (result) => [result.subkey, result.value]))
 
   # Public: increment the hash value by num atomically
   #
@@ -320,7 +320,7 @@ class PgBrain extends Brain
   # Returns promise for an Array of User objects.
   users: ->
     @getValues(@usersKey()).then (results) =>
-      _.map(results, (result) => @deserializeUser(result.value))
+      _.map(result.rows, (result) => @deserializeUser(result.value))
 
   # Public: Add a user to the data-store
   #
@@ -333,7 +333,7 @@ class PgBrain extends Brain
   # Returns promise for a User instance of the specified user.
   userForId: (id, options) ->
     @getValues(@usersKey(), id).then (results) =>
-      user = results[0]?.value
+      user = result.rows[0]?.value
       if user
         user = @deserializeUser(user)
 
@@ -349,7 +349,7 @@ class PgBrain extends Brain
     name = name.toLowerCase()
 
     @query("SELECT value FROM #{@tableName} WHERE key = $1 AND value ->> 'name' = $2", [@usersKey(), name]).then (results) =>
-      @deserializeUser(results[0]?.value)
+      @deserializeUser(result.rows[0]?.value)
 
   # Public: Get all users whose names match fuzzyName. Currently, match
   # means 'starts with', but this could be extended to match initials,
@@ -360,7 +360,7 @@ class PgBrain extends Brain
     fuzzyName = fuzzyName.toLowerCase()
 
     @query("SELECT value FROM #{@tableName} WHERE key = $1 AND value ->> 'name' LIKE $2", [@usersKey(), "#{fuzzyName}%"]).then (results) =>
-      @deserializeUser(results[0]?.value)
+      @deserializeUser(result.rows[0]?.value)
 
   # Public: If fuzzyName is an exact match for a user, returns an array with
   # just that user. Otherwise, returns an array of all users for which
