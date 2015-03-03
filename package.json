@@ -27,7 +27,6 @@
   "dependencies": {
     "coffee-script": "^1.8.0",
     "lodash": "^2.4.1",
-    "msgpack": "^0.2.4",
     "pg": "^4.3.0",
     "q": "^1.1.2"
   }

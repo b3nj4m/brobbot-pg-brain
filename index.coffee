@@ -3,10 +3,9 @@ Url = require "url"
 pg = require "pg"
 Q = require "q"
 _ = require "lodash"
-msgpack = require "msgpack"
 
 class PgBrain extends Brain
-  constructor: (@robot, @useMsgpack = true) ->
+  constructor: (@robot) ->
     super(@robot)
 
     pgUrl = null
