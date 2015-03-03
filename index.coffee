@@ -10,20 +10,13 @@ class PgBrain extends Brain
     super(@robot)
 
     #TODO heroku postgres?
-    pgUrl = if process.env.PGTOGO_URL?
-                 pgUrlEnv = "PGTOGO_URL"
-                 process.env.PGTOGO_URL
-               else if process.env.PGCLOUD_URL?
-                 pgUrlEnv = "PGCLOUD_URL"
-                 process.env.PGCLOUD_URL
-               else if process.env.BOXEN_PG_URL?
-                 pgUrlEnv = "BOXEN_PG_URL"
-                 process.env.BOXEN_PG_URL
-               else if process.env.PG_URL?
-                 pgUrlEnv = "PG_URL"
-                 process.env.PG_URL
-               else
-                 'postgres://root:password@localhost/brobbot'
+    pgUrl = null
+    for envVar in ['PGTOGO_URL', 'PGCLOUD_URL', 'BOXEN_PG_URL', 'PG_URL']
+      if process.env[envVar]
+        pgUrlEnv = "PGTOGO_URL"
+        pgUrl = process.env.PGTOGO_URL
+
+    pgUrl = pgUrl or 'postgres://root:password@localhost/brobbot'
 
     if pgUrlEnv?
       @robot.logger.info "Discovered pg from #{pgUrlEnv} environment variable"
@@ -49,8 +42,8 @@ class PgBrain extends Brain
   initTable: ->
     #TODO confirm varchar limits
     #TODO transactions?
-    query = "CREATE DATABASE IF NOT EXISTS #{@dbName}; USE #{@dbName}; CREATE TABLE IF NOT EXISTS #{@tableName} (key varchar(255) NOT NULL, subkey varchar(255), value jsonb, UNIQUE KEY (key, subkey))"
-    Q.ninvoke @client, 'query', query
+    query = "CREATE DATABASE IF NOT EXISTS #{@dbName}; USE #{@dbName}; CREATE TABLE IF NOT EXISTS #{@tableName} (key varchar(255) NOT NULL, subkey varchar(255), value jsonb, PRIMARY KEY (key, subkey))"
+    Q.ninvoke(@client, 'query', query)
 
   @query: (query, params) ->
     @ready.then =>
@@ -77,19 +70,24 @@ class PgBrain extends Brain
     params = [key]
     subkeyPart = ""
 
-    if subkey
+    if subkey?
       subkeyPart = "AND subkey = $3"
       params.push(subkey)
 
     @query("SELECT value FROM #{@tableName} WHERE key = $1 #{subkeyPart}", params).then (results) =>
-      _.map results, (result) => @deserialize result
+      _.map(results, (result) => @deserialize(result.value))
 
   llen: (key) ->
     @query("SELECT json_array_length(value) FROM #{@tableName} WHERE key = $1", [@key(key)]).then (results) -> results[0] or 0
 
   lset: (key, index, value) ->
     #TODO prolly doesn't work
-    @query("UPDATE #{@tableName} SET value -> $1 = $2 WHERE key = $3", [index, @serialize(value), @key(key)])
+    #@query("UPDATE #{@tableName} SET value -> $1 = $2 WHERE key = $3", [index, value, @key(key)])
+
+    @lgetall(key).then (values) =>
+      values = values or []
+      values[index] = value
+      @updateValue(@key(key), values)
 
   linsert: (key, placement, pivot, value) ->
     @lgetall(key).then (values) =>
@@ -126,16 +124,14 @@ class PgBrain extends Brain
       @updateValue(@key(key), values).then -> value
 
   lindex: (key, index) ->
-    @query("SELECT value->$1 FROM #{@tableName} WHERE key = $2", [index, @key(key)]).then (result) ->
-      result[0] or -1
+    @query("SELECT value -> $1 AS value FROM #{@tableName} WHERE key = $2", [index, @key(key)]).then (result) -> result[0]?.value or -1
 
   lgetall: (key) ->
     @getValues(@key(key))
 
   lrange: (key, start, end) ->
     @lgetall(key).then (values) =>
-      #TODO inclusiveness?
-      values.slice(start, end)
+      values.slice(start, end + 1)
 
   lrem: (key, value) ->
     @lgetall(key).then (values) =>
@@ -175,7 +171,8 @@ class PgBrain extends Brain
 
   keys: (searchKey = '') ->
     searchKey = @key searchKey
-    @query("SELECT key FROM #{@tableName} WHERE key LIKE $1", ["#{searchKey}%"])
+    @query("SELECT key FROM #{@tableName} WHERE key LIKE $1", ["#{searchKey}%"]).then (results) =>
+      _.map(results, (result) => @unkey(result.key))
 
   type: (key) ->
     #TODO
@@ -313,7 +310,7 @@ class PgBrain extends Brain
   # Returns promise for an Array of User objects.
   users: ->
     @getValues(@usersKey()).then (results) =>
-      _.map(results, (result) => @deserializeUser(result))
+      _.map(results, (result) => @deserializeUser(result.value))
 
   # Public: Add a user to the data-store
   #
@@ -326,9 +323,9 @@ class PgBrain extends Brain
   # Returns promise for a User instance of the specified user.
   userForId: (id, options) ->
     @getValues(@usersKey(), id).then (results) =>
-      user = results[0]
+      user = results[0]?.value
       if user
-        user = @deserializeUser user
+        user = @deserializeUser(user)
 
       if !user or (options and options.room and (user.room isnt options.room))
         return @addUser(new User(id, options))
@@ -341,7 +338,8 @@ class PgBrain extends Brain
   userForName: (name) ->
     name = name.toLowerCase()
 
-    @query("SELECT value FROM #{@tableName} WHERE key = $1 AND value ->> 'name' = $2", [@usersKey(), name]).then (results) => @deserializeUser(results[0])
+    @query("SELECT value FROM #{@tableName} WHERE key = $1 AND value ->> 'name' = $2", [@usersKey(), name]).then (results) =>
+      @deserializeUser(results[0]?.value)
 
   # Public: Get all users whose names match fuzzyName. Currently, match
   # means 'starts with', but this could be extended to match initials,
@@ -351,7 +349,8 @@ class PgBrain extends Brain
   usersForRawFuzzyName: (fuzzyName) ->
     fuzzyName = fuzzyName.toLowerCase()
 
-    @query("SELECT value FROM #{@tableName} WHERE key = $1 AND value ->> 'name' LIKE $2", [@usersKey(), "#{fuzzyName}%").then (results) => @deserializeUser(results[0])
+    @query("SELECT value FROM #{@tableName} WHERE key = $1 AND value ->> 'name' LIKE $2", [@usersKey(), "#{fuzzyName}%"]).then (results) =>
+      @deserializeUser(results[0]?.value)
 
   # Public: If fuzzyName is an exact match for a user, returns an array with
   # just that user. Otherwise, returns an array of all users for which
