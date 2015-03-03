@@ -9,16 +9,24 @@ class PgBrain extends Brain
   constructor: (@robot, @useMsgpack = true) ->
     super(@robot)
 
-    #TODO heroku postgres?
     pgUrl = null
-    for envVar in ['PGTOGO_URL', 'PGCLOUD_URL', 'BOXEN_PG_URL', 'PG_URL']
-      if process.env[envVar]
-        pgUrlEnv = "PGTOGO_URL"
-        pgUrl = process.env.PGTOGO_URL
+    pgUrlEnv = null
+    for own envVar, envVal of process.env
+      if /^HEROKU_POSTGRESQL_[A-Z0-9]+_URL$/.test(envVar)
+        pgUrlEnv = envVar
+        pgUrl = envVal
+        break
 
-    pgUrl = pgUrl or 'postgres://root:password@localhost/brobbot'
+    if not pgUrl
+      for envVar in ['POSTGRESQL_URL', 'DATABASE_URL']
+        if process.env[envVar]
+          pgUrlEnv = envVar
+          pgUrl = process.env[envVar]
+          break
 
-    if pgUrlEnv?
+    pgUrl = pgUrl or 'postgres://user:password@localhost/brobbot'
+
+    if pgUrlEnv
       @robot.logger.info "Discovered pg from #{pgUrlEnv} environment variable"
     else
       @robot.logger.info "Using default pg on localhost"
@@ -26,7 +34,6 @@ class PgBrain extends Brain
     @info = Url.parse pgUrl, true
     @prefix = process.env.BROBBOT_PG_DATA_PREFIX or 'data:'
     @prefixRegex = new RegExp("^#{@prefix}")
-    @dbName = process.env.BROBBOT_PG_DB_NAME or 'brobbot'
     @tableName = @info.path?.replace('/', '') or 'brobbot'
 
     @client = new pg.Client(pgUrl)
@@ -40,14 +47,15 @@ class PgBrain extends Brain
     @ready = @connected.then => @initTable
 
   initTable: ->
-    #TODO confirm varchar limits
     #TODO transactions?
-    query = "CREATE DATABASE IF NOT EXISTS #{@dbName}; USE #{@dbName}; CREATE TABLE IF NOT EXISTS #{@tableName} (key varchar(255) NOT NULL, subkey varchar(255), value jsonb, PRIMARY KEY (key, subkey))"
+    query = "CREATE TABLE IF NOT EXISTS #{@tableName} (key varchar(255) NOT NULL, subkey varchar(255), value jsonb, PRIMARY KEY (key), UNIQUE (key, subkey))"
     Q.ninvoke(@client, 'query', query)
 
   @query: (query, params) ->
     @ready.then =>
-      Q.ninvoke(@client, 'query', query, params)
+      Q.ninvoke(@client, 'query', query, params).fail (err) =>
+        @robot.logger.error('PGSQL error:', err.stack)
+        null
 
   updateValue: (key, value) ->
     @exists(key).then (exists) =>
@@ -78,12 +86,9 @@ class PgBrain extends Brain
       _.map(results, (result) => @deserialize(result.value))
 
   llen: (key) ->
-    @query("SELECT json_array_length(value) FROM #{@tableName} WHERE key = $1", [@key(key)]).then (results) -> results[0] or 0
+    @query("SELECT json_array_length(value::json) FROM #{@tableName} WHERE key = $1 AND value @> '[]'", [@key(key)]).then (results) -> results[0] or 0
 
   lset: (key, index, value) ->
-    #TODO prolly doesn't work
-    #@query("UPDATE #{@tableName} SET value -> $1 = $2 WHERE key = $3", [index, value, @key(key)])
-
     @lgetall(key).then (values) =>
       values = values or []
       values[index] = value
@@ -124,7 +129,7 @@ class PgBrain extends Brain
       @updateValue(@key(key), values).then -> value
 
   lindex: (key, index) ->
-    @query("SELECT value -> $1 AS value FROM #{@tableName} WHERE key = $2", [index, @key(key)]).then (result) -> result[0]?.value or -1
+    @query("SELECT value -> $1 AS value FROM #{@tableName} WHERE key = $2 AND value @> '[]'", [index, @key(key)]).then (result) -> result[0]?.value or -1
 
   lgetall: (key) ->
     @getValues(@key(key))
@@ -197,7 +202,7 @@ class PgBrain extends Brain
     @query("SELECT 1 FROM #{@tableName} WHERE key = $1 LIMIT 1", [@key(key)]).then (results) -> results.length > 0
 
   get: (key) ->
-    @getValues(@key(key)).then (results) -> results[0]
+    @getValues(@key(key)).then (results) -> results[0]?.value
 
   set: (key, value) ->
     @updateValue(@key(key), value)
