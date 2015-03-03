@@ -1,6 +1,6 @@
 {Brain, User} = require 'brobbot'
 Url = require "url"
-pg = require "pg"
+pg = require("pg").native
 Q = require "q"
 _ = require "lodash"
 
