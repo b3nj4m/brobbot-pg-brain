@@ -34,7 +34,7 @@ class PgBrain extends Brain
     @info = Url.parse pgUrl, true
     @prefix = process.env.BROBBOT_PG_DATA_PREFIX or 'data:'
     @prefixRegex = new RegExp("^#{@prefix}")
-    @tableName = @info.path?.replace('/', '') or 'brobbot'
+    @tableName = process.env.BROBBOT_PG_TABLE_NAME or 'brobbot'
 
     @client = new pg.Client(pgUrl)
     @connected = Q.ninvoke @client, 'connect'
@@ -44,7 +44,13 @@ class PgBrain extends Brain
     @connected.fail (err) =>
       @robot.logger.error "Failed to connect to pg: " + err
 
-    @ready = @connected.then => @initTable
+    @ready = @connected.then(=> @checkVersion).then(=> @initTable)
+
+  checkVersion: ->
+    query = "SELECT VERSION()"
+    Q.ninvoke(@client, 'query', query).then (results) =>
+      if results.length === 0 or not parseFloat(results[0].replace(/^postgresql /i)) >= 9.4
+        throw Error("Postgres version must be at least 9.4")
 
   initTable: ->
     #TODO transactions?
