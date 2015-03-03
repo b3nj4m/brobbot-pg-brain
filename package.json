@@ -1,0 +1,34 @@
+{
+  "name": "brobbot-pg-brain",
+  "version": "1.0.0",
+  "description": "postgres-backed brain for brobbot",
+  "main": "index.coffee",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git://github.com/b3nj4m/brobbot-pg-brain"
+  },
+  "keywords": [
+    "brobbot",
+    "postgres",
+    "postgresql",
+    "pg"
+  ],
+  "author": "Ben Robbins <ben.robbins@gmail.com> (https://b3nj4m.com/)",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/b3nj4m/brobbot-pg-brain/issues"
+  },
+  "peerDependencies": {
+    "brobbot": "3.x - 4.x"
+  },
+  "dependencies": {
+    "coffee-script": "^1.8.0",
+    "lodash": "^2.4.1",
+    "msgpack": "^0.2.4",
+    "pg": "^4.3.0",
+    "q": "^1.1.2"
+  }
+}
