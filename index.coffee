@@ -48,7 +48,7 @@ class PgBrain extends Brain
   checkVersion: ->
     query = "SELECT VERSION()"
     Q.ninvoke(@client, 'query', query).then (results) =>
-      if results.length === 0 or not parseFloat(results[0].replace(/^postgresql /i)) >= 9.4
+      if results.length is 0 or not parseFloat(results[0].replace(/^postgresql /i)) >= 9.4
         throw Error("Postgres version must be at least 9.4")
 
   initTable: ->
