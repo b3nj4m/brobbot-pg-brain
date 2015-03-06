@@ -258,14 +258,16 @@ class PgBrain extends Brain
   #
   # Returns promise
   incrby: (key, num) ->
-    key = @key(key)
-    updateValue = @exists(key).then (exists) =>
-      if exists
-        return @query("UPDATE #{@tableName} SET value = value + $1 WHERE key = $2", [num, key])
-      else
-        return @query("INSERT INTO #{@tableName} (key, value) VALUES ($1, $2)", [key, num])
+    @transaction =>
+      key = @key(key)
+      updateValue = @get(key).then (val) =>
+        if val?
+          num = val + num
+          @query("UPDATE #{@tableName} SET value = $1 WHERE key = $2", [num, key])
+        else
+          @query("INSERT INTO #{@tableName} (key, value) VALUES ($1, $2)", [key, num])
 
-    updateValue.then => @get(key)
+      updateValue.then => num
 
   # Public: Get all the keys for the given hash table name
   #
@@ -315,13 +317,17 @@ class PgBrain extends Brain
   #
   # Returns promise
   hincrby: (table, key, num) ->
-    table = @key(table)
+    @transaction =>
+      updateValue = @hget(table, key).then (val) =>
+        table = @key(table)
 
-    updateValue = @subExists(table, key).then (exists) =>
-      if exists
-        return @query("UPDATE #{@tableName} SET value = value + $1 WHERE key = $2 AND subkey = $3", [num, table, key])
-      else
-        return @query("INSERT INTO #{@tableName} (key, subkey, value) VALUES ($1, $2, $3)", [table, key, num])
+        if val?
+          num = val + num
+          @query("UPDATE #{@tableName} SET value = $1 WHERE key = $2 AND subkey = $3", [num, table, key])
+        else
+          @query("INSERT INTO #{@tableName} (key, subkey, value) VALUES ($1, $2, $3)", [table, key, num])
+
+      updateValue.then => num
 
   close: ->
     @client.end()
