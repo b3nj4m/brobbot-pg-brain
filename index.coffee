@@ -54,7 +54,6 @@ class PgBrain extends Brain
         @robbot.logger.error("Postgres version must be at least 9.4")
 
   initTable: ->
-    #TODO transactions?
     query = "CREATE TABLE IF NOT EXISTS #{@tableName} (key varchar(255) NOT NULL, subkey varchar(255), value jsonb, UNIQUE (key, subkey))"
     Q.ninvoke(@client, 'query', query)
 
@@ -66,7 +65,6 @@ class PgBrain extends Brain
       @query("COMMIT").then -> results
 
   query: (query, params) ->
-    @robot.logger.info(query, params)
     @ready.then =>
       Q.ninvoke(@client, 'query', query, params).then((results) =>
         results.rows
