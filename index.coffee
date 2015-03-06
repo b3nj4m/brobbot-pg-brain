@@ -8,6 +8,8 @@ class PgBrain extends Brain
   constructor: (@robot) ->
     super(@robot)
 
+    @currentTransaction = Q()
+
     pgUrl = null
     pgUrlEnv = null
     for own envVar, envVal of process.env
@@ -56,7 +58,15 @@ class PgBrain extends Brain
     query = "CREATE TABLE IF NOT EXISTS #{@tableName} (key varchar(255) NOT NULL, subkey varchar(255), value jsonb, UNIQUE (key, subkey))"
     Q.ninvoke(@client, 'query', query)
 
+  transaction: (fn) ->
+    @currentTransaction = @currentTransaction.then => @runTransaction(fn)
+
+  runTransaction: (fn) ->
+    @query("BEGIN").then(fn).then (results) =>
+      @query("COMMIT").then -> results
+
   query: (query, params) ->
+    @robot.logger.info(query, params)
     @ready.then =>
       Q.ninvoke(@client, 'query', query, params).then((results) =>
         results.rows
@@ -101,71 +111,95 @@ class PgBrain extends Brain
     @query("SELECT json_array_length(value::json) AS length FROM #{@tableName} WHERE key = $1 AND value @> '[]'", [@key(key)]).then (results) -> results[0]?.length or 0
 
   lset: (key, index, value) ->
-    @lgetall(key).then (values) =>
-      values = values or []
-      values[index] = value
-      @updateValue(@key(key), values)
+    @transaction =>
+      @lgetall(key).then (values) =>
+        values = values or []
+        values[index] = value
+        @updateValue(@key(key), values)
 
   linsert: (key, placement, pivot, value) ->
-    @lgetall(key).then (values) =>
-      idx = values.indexOf(pivot)
+    @transaction =>
+      @lgetall(key).then (values) =>
+        values = values or []
+        idx = values.indexOf(pivot)
 
-      if idx is -1
-        return -1
+        if idx is -1
+          return -1
 
-      if placement is 'AFTER'
-        idx = idx + 1
+        if placement is 'AFTER'
+          idx = idx + 1
 
-      values.splice(idx, 0, value)
+        values.splice(idx, 0, value)
 
-      @updateValue(@key(key), values)
+        @updateValue(@key(key), values)
 
   lpush: (key, value) ->
-    @lgetall(key).then (values) =>
-      values.unshift(value)
-      @updateValue(@key(key), values)
+    @transaction =>
+      @lgetall(key).then (values) =>
+        values = values or []
+        values.unshift(value)
+        @updateValue(@key(key), values)
 
   rpush: (key, value) ->
-    @lgetall(key).then (values) =>
-      values.push(value)
-      @updateValue(@key(key), values)
+    @transaction =>
+      @lgetall(key).then (values) =>
+        values = values or []
+        values.push(value)
+        @updateValue(@key(key), values)
 
   lpop: (key) ->
-    @lgetall(key).then (values) =>
-      value = values.shift()
-      @updateValue(@key(key), values).then -> value
+    @transaction =>
+      @lgetall(key).then (values) =>
+        if values
+          value = values.shift()
+          @updateValue(@key(key), values).then -> value
+        else
+          null
 
   rpop: (key) ->
-    @lgetall(key).then (values) =>
-      value = values.pop()
-      @updateValue(@key(key), values).then -> value
+    @transaction =>
+      @lgetall(key).then (values) =>
+        if values
+          value = values.pop()
+          @updateValue(@key(key), values).then -> value
+        else
+          null
 
   lindex: (key, index) ->
-    @query("SELECT value -> $1 AS value FROM #{@tableName} WHERE key = $2 AND value @> '[]'", [index, @key(key)]).then (results) -> results[0]?.value or -1
+    @query("SELECT value -> $1 AS value FROM #{@tableName} WHERE key = $2 AND value @> '[]'", [index, @key(key)]).then (results) -> results[0]?.value or null
 
   lgetall: (key) ->
-    @getValues(@key(key)).then (results) => results[0]
+    @getValues(@key(key)).then (results) -> results[0]
 
   lrange: (key, start, end) ->
     @lgetall(key).then (values) =>
-      values.slice(start, end + 1)
+      if values
+        values.slice(start, end + 1)
+      else
+        null
 
   lrem: (key, value) ->
-    @lgetall(key).then (values) =>
-      idx = values.indexOf(value)
-      count = 0
+    @transaction =>
+      @lgetall(key).then (values) =>
+        if values
+          idx = values.indexOf(value)
+          count = 0
 
-      while idx isnt -1
-        count++
-        values.splice(idx, 1)
-        idx = values.indexOf(value)
+          while idx isnt -1
+            count++
+            values.splice(idx, 1)
+            idx = values.indexOf(value)
 
-      @updateValue(@key(key), values).then -> count
+          @updateValue(@key(key), values).then -> count
+        else
+          0
 
   sadd: (key, value) ->
-    @lgetall(key).then (values) =>
-      values.push(value)
-      @updateSet(@key(key), values)
+    @transaction =>
+      @lgetall(key).then (values) =>
+        values = values or []
+        values.push(value)
+        @updateSet(@key(key), values)
 
   sismember: (key, value) ->
     @query("SELECT 1 FROM #{@tableName} WHERE value @> '[]' AND key = $1 AND value ? $2", [@key(key), value]).then (results) -> results.length > 0
@@ -188,7 +222,7 @@ class PgBrain extends Brain
 
   keys: (searchKey = '') ->
     searchKey = @key searchKey
-    @query("SELECT key FROM #{@tableName} WHERE key ILIKE $1", ["#{searchKey}%"]).then (results) =>
+    @query("SELECT DISTINCT key FROM #{@tableName} WHERE key ILIKE $1", ["#{searchKey}%"]).then (results) =>
       _.map(results, (result) => @unkey(result.key))
 
   type: (key) ->
