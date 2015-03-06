@@ -74,7 +74,7 @@ class PgBrain extends Brain
       )
 
   updateValue: (key, value) ->
-    @exists(key).then (exists) =>
+    @keyExists(key).then (exists) =>
       value = @serialize(value)
 
       if exists
@@ -85,7 +85,7 @@ class PgBrain extends Brain
   updateSubValue: (key, subkey, value) ->
     value = @serialize(value)
 
-    @subExists(key, subkey).then (exists) =>
+    @subkeyExists(key, subkey).then (exists) =>
       if exists
         return @query("UPDATE #{@tableName} SET value = $1 WHERE key = $2 AND subkey = $3", [value, key, subkey])
       else
@@ -239,11 +239,14 @@ class PgBrain extends Brain
   usersKey: () ->
     "users"
 
-  subExists: (table, key) ->
+  subkeyExists: (table, key) ->
     @query("SELECT 1 FROM #{@tableName} WHERE key = $1 AND subkey = $2 LIMIT 1", [table, key]).then (results) -> results.length > 0
 
-  exists: (key) ->
+  keyExists: (key) ->
     @query("SELECT 1 FROM #{@tableName} WHERE key = $1 LIMIT 1", [key]).then (results) -> results.length > 0
+
+  exists: (key) ->
+    @keyExists(@key(key))
 
   get: (key) ->
     @getValues(@key(key)).then (results) -> results[0]
