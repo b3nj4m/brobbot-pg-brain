@@ -61,8 +61,10 @@ class PgBrain extends Brain
     @currentTransaction = @currentTransaction.then => @runTransaction(fn)
 
   runTransaction: (fn) ->
-    @query("BEGIN").then(fn).then (results) =>
-      @query("COMMIT").then -> results
+    @query("BEGIN").then(fn).then((result) =>
+      @query("COMMIT").then -> result
+    ).fail (err) =>
+      @query("COMMIT").then -> throw err
 
   query: (query, params) ->
     @ready.then =>
@@ -91,9 +93,6 @@ class PgBrain extends Brain
       else
         return @query("INSERT INTO #{@tableName} (key, value, subkey) VALUES ($1, $2, $3)", [key, value, subkey])
 
-  updateSet: (key, values) ->
-    @updateValue(key, _.unique(values))
-
   getValues: (key, subkey) ->
     params = [key]
     subkeyPart = ""
@@ -106,10 +105,10 @@ class PgBrain extends Brain
       _.map(results, (result) => @deserialize(result.value))
 
   reset: ->
-    @query("DELETE FROM #{@tableName} WHERE key ILIKE $1 OR key ILIKE $2", ["#{@key()}%", "#{@usersKey()}%"]).then(-> Q())
+    @query("DELETE FROM #{@tableName}").then -> Q()
 
   llen: (key) ->
-    @query("SELECT json_array_length(value::json) AS length FROM #{@tableName} WHERE key = $1 AND value @> '[]'", [@key(key)]).then (results) -> results[0]?.length or 0
+    @query("SELECT jsonb_array_length(value) AS length FROM #{@tableName} WHERE key = $1 AND value @> '[]'", [@key(key)]).then (results) -> results[0]?.length or 0
 
   lset: (key, index, value) ->
     @transaction =>
@@ -118,11 +117,16 @@ class PgBrain extends Brain
         values[index] = value
         @updateValue(@key(key), values)
 
+  lfindindex: (values, value) ->
+    serializedValue = @serialize(value)
+
+    _.findIndex values, (value) =>
+      @serialize(value) is serializedValue
+
   linsert: (key, placement, pivot, value) ->
     @transaction =>
       @lgetall(key).then (values) =>
-        values = values or []
-        idx = values.indexOf(pivot)
+        idx = @lfindindex(values, pivot)
 
         if idx is -1
           return -1
@@ -167,7 +171,7 @@ class PgBrain extends Brain
           null
 
   lindex: (key, index) ->
-    @query("SELECT value -> $1 AS value FROM #{@tableName} WHERE key = $2 AND value @> '[]'", [index, @key(key)]).then (results) -> results[0]?.value or null
+    @query("SELECT value -> $1::int AS value FROM #{@tableName} WHERE key = $2 AND value @> '[]'", [index, @key(key)]).then (results) => @deserialize(results[0]?.value or null)
 
   lgetall: (key) ->
     @getValues(@key(key)).then (results) -> results[0]
@@ -182,28 +186,26 @@ class PgBrain extends Brain
   lrem: (key, value) ->
     @transaction =>
       @lgetall(key).then (values) =>
-        if values
-          idx = values.indexOf(value)
-          count = 0
+        serialized = @serialize(value)
+        newValues = _.without(_.map(values, @serialize.bind(@)), serialized)
+        #TODO inefficient
+        newValues = _.map(newValues, (value) => @deserialize(value, true))
 
-          while idx isnt -1
-            count++
-            values.splice(idx, 1)
-            idx = values.indexOf(value)
-
-          @updateValue(@key(key), values).then -> count
-        else
-          0
+        @updateValue(@key(key), newValues).then -> values.length - newValues.length
 
   sadd: (key, value) ->
     @transaction =>
-      @lgetall(key).then (values) =>
-        values = values or []
-        values.push(value)
-        @updateSet(@key(key), values)
+      @sismember(key, value).then (isMemeber) =>
+        if isMemeber
+          return -1
+
+        @lgetall(key).then (values) =>
+          values = values or []
+          values.push(value)
+          @updateValue(@key(key), values)
 
   sismember: (key, value) ->
-    @query("SELECT 1 FROM #{@tableName} WHERE value @> '[]' AND key = $1 AND value ? $2", [@key(key), value]).then (results) -> results.length > 0
+    @query("SELECT 1 FROM (SELECT jsonb_array_elements_text(value) AS elem FROM #{@tableName} WHERE value @> '[]' AND key = $1) AS foo WHERE foo.elem = $2::jsonb::text", [@key(key), @serialize(value)]).then (results) -> results.length > 0
 
   srem: (key, value) ->
     @lrem(key, value)
@@ -215,7 +217,10 @@ class PgBrain extends Brain
     @rpop(key)
 
   srandmember: (key) ->
+    #TODO can prolly be done with getting entire list in single query
     @smembers(key).then (values) =>
+      if not values or values.length is 0
+        return null
       values[_.random(values.length - 1)]
 
   smembers: (key) ->
@@ -252,7 +257,7 @@ class PgBrain extends Brain
     @keyExists(@key(key))
 
   get: (key) ->
-    @getValues(@key(key)).then (results) -> results[0]
+    @getValues(@key(key)).then (results) -> results[0] or null
 
   set: (key, value) ->
     @updateValue(@key(key), value)
@@ -265,8 +270,9 @@ class PgBrain extends Brain
   # Returns promise
   incrby: (key, num) ->
     @transaction =>
-      key = @key(key)
       updateValue = @get(key).then (val) =>
+        key = @key(key)
+
         if val?
           num = val + num
           @query("UPDATE #{@tableName} SET value = $1 WHERE key = $2", [num, key])
@@ -279,7 +285,7 @@ class PgBrain extends Brain
   #
   # Returns promise for array.
   hkeys: (table) ->
-    @query("SELECT subkey FROM #{@tableName} WHERE key = $1", [table]).then (results) =>
+    @query("SELECT subkey FROM #{@tableName} WHERE key = $1", [@key(table)]).then (results) =>
       _.map(results, (result) -> result.subkey)
 
   # Public: Get all the values for the given hash table name
@@ -292,7 +298,7 @@ class PgBrain extends Brain
   #
   # Returns promise for int.
   hlen: (table) ->
-    @query("SELECT COUNT(*) AS count FROM #{@tableName} WHERE key = $1 GROUP BY key", [@key(table)]).then (results) -> results[0]?.count or 0
+    @query("SELECT COUNT(*) AS count FROM #{@tableName} WHERE key = $1 GROUP BY key", [@key(table)]).then (results) -> parseInt(results[0]?.count) or 0
 
   # Public: Set a value in the specified hash table
   #
@@ -347,7 +353,9 @@ class PgBrain extends Brain
   # Public: Perform any necessary post-get deserialization on a value
   #
   # Returns deserialized value
-  deserialize: (value) ->
+  deserialize: (value, force) ->
+    if force
+      return JSON.parse(value.toString())
     #json apparently gets deserialized by pg
     value
 
