@@ -105,6 +105,9 @@ class PgBrain extends Brain
     @query("SELECT value FROM #{@tableName} WHERE key = $1 #{subkeyPart}", params).then (results) =>
       _.map(results, (result) => @deserialize(result.value))
 
+  reset: ->
+    @query("DROP TABLE #{@tableName}").then(-> Q())
+
   llen: (key) ->
     @query("SELECT json_array_length(value::json) AS length FROM #{@tableName} WHERE key = $1 AND value @> '[]'", [@key(key)]).then (results) -> results[0]?.length or 0
 
