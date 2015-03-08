@@ -106,7 +106,7 @@ class PgBrain extends Brain
       _.map(results, (result) => @deserialize(result.value))
 
   reset: ->
-    @query("DROP TABLE #{@tableName}").then(-> Q())
+    @query("DELETE FROM #{@tableName} WHERE key ILIKE $1 OR key ILIKE $2", ["#{@key()}%", "#{@usersKey()}%"]).then(-> Q())
 
   llen: (key) ->
     @query("SELECT json_array_length(value::json) AS length FROM #{@tableName} WHERE key = $1 AND value @> '[]'", [@key(key)]).then (results) -> results[0]?.length or 0
