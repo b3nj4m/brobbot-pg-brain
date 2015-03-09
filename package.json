@@ -1,6 +1,6 @@
 {
   "name": "brobbot-pg-brain",
-  "version": "0.9.0",
+  "version": "1.0.0",
   "description": "postgres-backed brain for brobbot",
   "main": "index.coffee",
   "scripts": {
@@ -22,7 +22,7 @@
     "url": "https://github.com/b3nj4m/brobbot-pg-brain/issues"
   },
   "peerDependencies": {
-    "brobbot": "3.x - 4.x"
+    "brobbot": "4.x - 5.x"
   },
   "dependencies": {
     "coffee-script": "^1.8.0",
