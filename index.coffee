@@ -205,7 +205,13 @@ class PgBrain extends Brain
           @updateValue(@key(key), values)
 
   sismember: (key, value) ->
-    @query("SELECT 1 FROM (SELECT jsonb_array_elements_text(value) AS elem FROM #{@tableName} WHERE value @> '[]' AND key = $1) AS foo WHERE foo.elem = $2::jsonb::text", [@key(key), @serialize(value)]).then (results) -> results.length > 0
+    @query("
+      SELECT
+        1
+      FROM (SELECT jsonb_array_elements_text(value) AS elem FROM #{@tableName} WHERE value @> '[]' AND key = $1) AS foo
+      WHERE
+        foo.elem = $2::jsonb::text
+    ", [@key(key), @serialize(value)]).then (results) -> results.length > 0
 
   srem: (key, value) ->
     @lrem(key, value)
@@ -217,11 +223,17 @@ class PgBrain extends Brain
     @rpop(key)
 
   srandmember: (key) ->
-    #TODO can prolly be done with getting entire list in single query
-    @smembers(key).then (values) =>
-      if not values or values.length is 0
+    @query("
+      SELECT
+        foo.elem
+      FROM
+        (SELECT jsonb_array_elements(value) AS elem FROM #{@tableName} WHERE value @> '[]' AND key = $1) AS foo
+      OFFSET (random() * (SELECT jsonb_array_length(value) FROM #{@tableName} WHERE value @> '[]' AND key = $1))
+      LIMIT 1
+    ", [@key(key)]).then (results) =>
+      if results.length is 0
         return null
-      values[_.random(values.length - 1)]
+      @deserialize(results[0].elem)
 
   smembers: (key) ->
     @lgetall(key)
