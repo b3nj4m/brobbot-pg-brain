@@ -244,8 +244,22 @@ class PgBrain extends Brain
       _.map(results, (result) => @unkey(result.key))
 
   type: (key) ->
-    #TODO
-    @query("")
+    #TODO unable to distinguish sets
+    @query("
+      SELECT
+        (CASE WHEN value @> '[]' THEN
+          'list'
+        WHEN subkey IS NOT NULL THEN
+          'hash'
+        ELSE
+          'string'
+        END) AS type
+        FROM
+          #{@tableName}
+        WHERE
+          key = $1
+        LIMIT 1
+    ", [@key(key)]).then (results) -> results[0]?.type
 
   types: (keys) ->
     Q.all(_.map(keys, (key) => @type(key)))
