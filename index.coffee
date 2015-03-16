@@ -33,8 +33,8 @@ class PgBrain extends Brain
       @robot.logger.info "Using default pg on localhost"
 
     @info = Url.parse pgUrl, true
-    @prefix = process.env.BROBBOT_PG_DATA_PREFIX or 'data:'
-    @prefixRegex = new RegExp("^#{@prefix}")
+    @prefix = process.env.BROBBOT_PG_DATA_PREFIX or 'data'
+    @prefixRegex = new RegExp("^#{@prefix}:")
     @tableName = process.env.BROBBOT_PG_TABLE_NAME or 'brobbot'
 
     @client = new pg.Client(pgUrl)
@@ -54,7 +54,7 @@ class PgBrain extends Brain
         @robbot.logger.error("Postgres version must be at least 9.4")
 
   initTable: ->
-    query = "CREATE TABLE IF NOT EXISTS #{@tableName} (key varchar(255) NOT NULL, subkey varchar(255), value jsonb, UNIQUE (key, subkey))"
+    query = "CREATE TABLE IF NOT EXISTS #{@tableName} (key varchar(255) NOT NULL, subkey varchar(255), isset boolean not null default false, value jsonb, UNIQUE (key, subkey))"
     Q.ninvoke(@client, 'query', query)
 
   transaction: (fn) ->
@@ -75,14 +75,14 @@ class PgBrain extends Brain
         null
       )
 
-  updateValue: (key, value) ->
+  updateValue: (key, value, isSet = false) ->
     @keyExists(key).then (exists) =>
       value = @serialize(value)
 
       if exists
         return @query("UPDATE #{@tableName} SET value = $1 WHERE key = $2", [value, key])
       else
-        return @query("INSERT INTO #{@tableName} (key, value) VALUES ($1, $2)", [key, value])
+        return @query("INSERT INTO #{@tableName} (key, value, isset) VALUES ($1, $2, $3)", [key, value, isSet])
 
   updateSubValue: (key, subkey, value) ->
     value = @serialize(value)
@@ -202,13 +202,13 @@ class PgBrain extends Brain
         @lgetall(key).then (values) =>
           values = values or []
           values.push(value)
-          @updateValue(@key(key), values)
+          @updateValue(@key(key), values, true)
 
   sismember: (key, value) ->
     @query("
       SELECT
         1
-      FROM (SELECT jsonb_array_elements_text(value) AS elem FROM #{@tableName} WHERE value @> '[]' AND key = $1) AS foo
+      FROM (SELECT jsonb_array_elements_text(value) AS elem FROM #{@tableName} WHERE isset = true AND value @> '[]' AND key = $1) AS foo
       WHERE
         foo.elem = $2::jsonb::text
     ", [@key(key), @serialize(value)]).then (results) -> results.length > 0
@@ -228,7 +228,7 @@ class PgBrain extends Brain
         foo.elem
       FROM
         (SELECT jsonb_array_elements(value) AS elem FROM #{@tableName} WHERE value @> '[]' AND key = $1) AS foo
-      OFFSET (random() * (SELECT jsonb_array_length(value) FROM #{@tableName} WHERE value @> '[]' AND key = $1))
+      OFFSET (random() * (SELECT (CASE WHEN jsonb_array_length(value) > 0 THEN jsonb_array_length(value) - 1 ELSE 0 END) FROM #{@tableName} WHERE value @> '[]' AND key = $1))
       LIMIT 1
     ", [@key(key)]).then (results) =>
       if results.length is 0
@@ -244,10 +244,11 @@ class PgBrain extends Brain
       _.map(results, (result) => @unkey(result.key))
 
   type: (key) ->
-    #TODO unable to distinguish sets
     @query("
       SELECT
-        (CASE WHEN value @> '[]' THEN
+        (CASE WHEN isset THEN
+          'set'
+        WHEN value @> '[]' THEN
           'list'
         WHEN subkey IS NOT NULL THEN
           'hash'
@@ -268,7 +269,7 @@ class PgBrain extends Brain
     key.replace(@prefixRegex, '')
 
   key: (key) ->
-    "#{@prefix}#{key}"
+    "#{@prefix}:#{key}"
 
   usersKey: () ->
     "users"
