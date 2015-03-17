@@ -1,6 +1,6 @@
 {
   "name": "brobbot-pg-brain",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "postgres-backed brain for brobbot",
   "main": "index.coffee",
   "scripts": {
