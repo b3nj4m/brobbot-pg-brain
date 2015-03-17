@@ -208,9 +208,9 @@ class PgBrain extends Brain
     @query("
       SELECT
         1
-      FROM (SELECT jsonb_array_elements_text(value) AS elem FROM #{@tableName} WHERE isset = true AND value @> '[]' AND key = $1) AS foo
+      FROM (SELECT jsonb_array_elements(value) AS elem FROM #{@tableName} WHERE isset = true AND value @> '[]' AND key = $1) AS foo
       WHERE
-        foo.elem = $2::jsonb::text
+        foo.elem = $2::jsonb
     ", [@key(key), @serialize(value)]).then (results) -> results.length > 0
 
   srem: (key, value) ->
