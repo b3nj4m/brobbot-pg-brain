@@ -253,7 +253,7 @@ class PgBrain extends Brain
         WHEN subkey IS NOT NULL THEN
           'hash'
         ELSE
-          'string'
+          'object'
         END) AS type
         FROM
           #{@tableName}
