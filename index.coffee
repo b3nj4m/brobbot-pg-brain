@@ -350,7 +350,10 @@ class PgBrain extends Brain
   # Returns: promise for object.
   hgetall: (table) ->
     @query("SELECT subkey, value FROM #{@tableName} WHERE key = $1", [@key(table)]).then (results) =>
-      _.object(_.map(results, (result) => [result.subkey, result.value]))
+      map = new Map()
+      _.each results, (result) =>
+        map.set(result.subkey, @deserialize(result.value))
+      map
 
   # Public: increment the hash value by num atomically
   #
