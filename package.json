@@ -2,7 +2,7 @@
   "name": "brobbot-pg-brain",
   "version": "2.0.1",
   "description": "postgres-backed brain for brobbot",
-  "main": "index.coffee",
+  "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
   },
@@ -25,7 +25,6 @@
     "brobbot": "4.x - 5.x"
   },
   "dependencies": {
-    "coffee-script": "^1.8.0",
     "lodash": "^2.4.1",
     "pg": "^4.3.0",
     "pg-native": "^1.8.0",
