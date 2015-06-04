@@ -291,7 +291,7 @@ PgBrain.prototype.lindex = function(key, index) {
   var self = this;
 
   return this.query("SELECT value -> $1::int AS value FROM " + this.tableName + " WHERE key = $2 AND value @> '[]'", [index, this.key(key)]).then(function(results) {
-    return self.deserialize(results.length > 0 ? results[0] : null);
+    return self.deserialize(results.length > 0 ? results[0].value : null);
   });
 };
 
