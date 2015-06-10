@@ -629,7 +629,7 @@ PgBrain.prototype.usersForFuzzyName = function(fuzzyName) {
 
   return this.usersForRawFuzzyName(fuzzyName).then(function(matchedUsers) {
     var exactMatch = _.find(matchedUsers, function(user) {
-      return user.name.toLowerCase() === fuzzyName;
+      return user && user.name.toLowerCase() === fuzzyName;
     });
     return exactMatch && [exactMatch] || matchedUsers;
   });
